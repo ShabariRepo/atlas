@@ -9,28 +9,138 @@ echo "================"
 echo ""
 
 # Load env
-set -a
-source .env 2>/dev/null || true
-set +a
-
-BONITO_URL="${BONITO_API_URL:-http://localhost:8001}"
-API_KEY="${BONITO_API_KEY:-}"
-
-if [ -z "$API_KEY" ]; then
-    echo "❌ BONITO_API_KEY not set. Run ./scripts/setup.sh first."
-    exit 1
+if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
 fi
 
-# Helper: deploy a single agent
+BONITO_URL="${BONITO_API_URL:-https://api.getbonito.com}"
+AUTH_TOKEN="${BONITO_AUTH_TOKEN:-}"
+
+# ── Authentication ──────────────────────────────────────────
+# If no token provided, login with email/password
+if [ -z "$AUTH_TOKEN" ]; then
+    BONITO_EMAIL="${BONITO_EMAIL:-}"
+    BONITO_PASSWORD="${BONITO_PASSWORD:-}"
+
+    if [ -z "$BONITO_EMAIL" ] || [ -z "$BONITO_PASSWORD" ]; then
+        echo "🔐 No auth token found. Please provide credentials."
+        read -rp "  Email: " BONITO_EMAIL
+        read -rsp "  Password: " BONITO_PASSWORD
+        echo ""
+    fi
+
+    echo "🔐 Logging in..."
+    LOGIN_RESPONSE=$(curl -s -X POST "${BONITO_URL}/api/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"email\": \"${BONITO_EMAIL}\", \"password\": \"${BONITO_PASSWORD}\"}")
+
+    AUTH_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.access_token // empty')
+
+    if [ -z "$AUTH_TOKEN" ]; then
+        echo "❌ Login failed: $(echo "$LOGIN_RESPONSE" | jq -r '.error.message // "Unknown error"')"
+        exit 1
+    fi
+    echo "✅ Logged in."
+    echo ""
+fi
+
+AUTH_HEADER="Authorization: Bearer ${AUTH_TOKEN}"
+PROJECT_ID="${BONITO_PROJECT_ID:-}"
+
+# ── Find or Create Project ──────────────────────────────────
+find_or_create_project() {
+    if [ -n "$PROJECT_ID" ]; then
+        return
+    fi
+
+    echo "📁 Finding or creating project..."
+    local projects
+    projects=$(curl -s -H "$AUTH_HEADER" "${BONITO_URL}/api/projects")
+
+    # Response is an array
+    PROJECT_ID=$(echo "$projects" | jq -r '.[0].id // empty' 2>/dev/null)
+
+    if [ -z "$PROJECT_ID" ]; then
+        local create_response
+        create_response=$(curl -s -X POST "${BONITO_URL}/api/projects" \
+            -H "$AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            -d '{"name": "Atlas DevOps", "description": "AI-Powered DevOps Command Center"}')
+
+        PROJECT_ID=$(echo "$create_response" | jq -r '.id // empty')
+
+        if [ -z "$PROJECT_ID" ]; then
+            echo "❌ Failed to create project: $(echo "$create_response" | jq -r '.error.message // .')"
+            exit 1
+        fi
+        echo "  ✅ Created project: Atlas DevOps ($PROJECT_ID)"
+    else
+        local project_name
+        project_name=$(echo "$projects" | jq -r '.[0].name')
+        echo "  ✅ Using project: $project_name ($PROJECT_ID)"
+    fi
+    echo ""
+}
+
+# ── Deploy Knowledge Base ───────────────────────────────────
+deploy_kb() {
+    echo "📚 Setting up knowledge base..."
+
+    local kb_response
+    kb_response=$(curl -s -w "\n%{http_code}" \
+        -X POST "${BONITO_URL}/api/knowledge-bases" \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "name": "atlas-internal-docs",
+            "description": "Internal engineering documentation for Atlas",
+            "source_type": "upload",
+            "embedding_model": "auto",
+            "chunk_size": 512,
+            "chunk_overlap": 50
+        }')
+
+    local http_code
+    http_code=$(echo "$kb_response" | tail -1)
+    local kb_body
+    kb_body=$(echo "$kb_response" | sed '$d')
+
+    if [[ "$http_code" =~ ^2 ]]; then
+        KB_ID=$(echo "$kb_body" | jq -r '.id')
+        echo "  ✅ Knowledge base created ($KB_ID)"
+
+        # Upload sample docs
+        if [ -d "agents/docs-assistant/sample-docs" ]; then
+            for doc in agents/docs-assistant/sample-docs/*.md; do
+                [ -f "$doc" ] || continue
+                local doc_name
+                doc_name=$(basename "$doc")
+                echo "  📄 Uploading $doc_name..."
+                curl -s -X POST "${BONITO_URL}/api/knowledge-bases/${KB_ID}/documents" \
+                    -H "$AUTH_HEADER" \
+                    -F "file=@$doc" > /dev/null
+            done
+            echo "  ✅ Documents uploaded"
+        fi
+    else
+        echo "  ⚠️  KB creation returned HTTP $http_code"
+        echo "     $(echo "$kb_body" | jq -r '.error.message // .' 2>/dev/null | head -1)"
+        KB_ID=""
+    fi
+}
+
+# ── Deploy Agent ────────────────────────────────────────────
 deploy_agent() {
     local name=$1
-    local config_path="agents/$name/config.json"
     local prompt_path="agents/$name/system-prompt.md"
+    local config_path="agents/$name/config.json"
 
-    echo "  Deploying $name..."
+    echo "  🤖 $name..."
 
     if [ ! -f "$config_path" ]; then
-        echo "    ❌ Config not found: $config_path"
+        echo "     ❌ Config not found: $config_path"
         return 1
     fi
 
@@ -40,60 +150,32 @@ deploy_agent() {
         system_prompt=$(cat "$prompt_path")
     fi
 
-    # Deploy via Bonito API
-    # First ensure we have a project (using default project if available)
-    local project_id="${BONITO_PROJECT_ID:-}"
-    
-    if [ -z "$project_id" ]; then
-        echo "    🔍 Finding or creating project..."
-        local project_response
-        project_response=$(curl -s -w "\n%{http_code}" \
-            -X GET "${BONITO_URL}/api/projects" \
-            -H "Authorization: Bearer ${API_KEY}")
-        
-        local project_http_code
-        project_http_code=$(echo "$project_response" | tail -1)
-        local project_body
-        project_body=$(echo "$project_response" | sed '$d')
-        
-        if [[ "$project_http_code" =~ ^2 ]]; then
-            project_id=$(echo "$project_body" | jq -r '.projects[0].id // empty')
-        fi
-        
-        if [ -z "$project_id" ]; then
-            echo "    📁 Creating default project..."
-            local create_project_response
-            create_project_response=$(curl -s -w "\n%{http_code}" \
-                -X POST "${BONITO_URL}/api/projects" \
-                -H "Authorization: Bearer ${API_KEY}" \
-                -H "Content-Type: application/json" \
-                -d '{
-                    "name": "atlas-agents", 
-                    "description": "Atlas AI DevOps agents"
-                }')
-            
-            local create_http_code
-            create_http_code=$(echo "$create_project_response" | tail -1)
-            local create_body
-            create_body=$(echo "$create_project_response" | sed '$d')
-            
-            if [[ "$create_http_code" =~ ^2 ]]; then
-                project_id=$(echo "$create_body" | jq -r '.id // .project.id')
-                echo "    ✅ Project created (ID: $project_id)"
-            else
-                echo "    ❌ Failed to create project (HTTP $create_http_code)"
-                return 1
-            fi
-        fi
-    fi
-    
+    # Build the API payload from config.json
+    # The config has agent metadata, model info, etc. We map to Bonito's AgentCreate schema.
+    local agent_name agent_desc model_id
+    agent_name=$(jq -r '.agent.name // .name // "Unknown"' "$config_path")
+    agent_desc=$(jq -r '.agent.description // .description // ""' "$config_path")
+    model_id=$(jq -r '.model.primary.provider + "/" + .model.primary.model // "auto"' "$config_path")
+
+    local payload
+    payload=$(jq -n \
+        --arg name "$agent_name" \
+        --arg desc "$agent_desc" \
+        --arg prompt "$system_prompt" \
+        --arg model "$model_id" \
+        '{
+            name: $name,
+            description: $desc,
+            system_prompt: $prompt,
+            model_id: $model
+        }')
+
     local response
     response=$(curl -s -w "\n%{http_code}" \
-        -X POST "${BONITO_URL}/api/projects/${project_id}/agents" \
-        -H "Authorization: Bearer ${API_KEY}" \
+        -X POST "${BONITO_URL}/api/projects/${PROJECT_ID}/agents" \
+        -H "$AUTH_HEADER" \
         -H "Content-Type: application/json" \
-        -d @<(jq --arg prompt "$system_prompt" \
-            '.system_prompt = $prompt' "$config_path"))
+        -d "$payload")
 
     local http_code
     http_code=$(echo "$response" | tail -1)
@@ -102,61 +184,54 @@ deploy_agent() {
 
     if [[ "$http_code" =~ ^2 ]]; then
         local agent_id
-        agent_id=$(echo "$body" | jq -r '.id // .agent.id // "unknown"')
-        echo "    ✅ Deployed (ID: $agent_id)"
+        agent_id=$(echo "$body" | jq -r '.id')
+        echo "     ✅ Deployed ($agent_id) - model: $model_id"
+
+        # Register MCP servers if defined in config
+        local mcp_servers
+        mcp_servers=$(jq -r '.mcp_servers[]? // empty' "$config_path" 2>/dev/null)
+        for server_name in $mcp_servers; do
+            local upper_name
+            upper_name=$(echo "$server_name" | tr '[:lower:]' '[:upper:]')
+            local url_var="MCP_${upper_name}_URL"
+            local url="${!url_var:-}"
+            if [ -n "$url" ]; then
+                curl -s -X POST "${BONITO_URL}/api/agents/${agent_id}/mcp-servers" \
+                    -H "$AUTH_HEADER" \
+                    -H "Content-Type: application/json" \
+                    -d "{
+                        \"name\": \"$server_name\",
+                        \"transport_type\": \"http\",
+                        \"endpoint_config\": {\"url\": \"$url\"},
+                        \"auth_config\": {\"type\": \"none\"}
+                    }" > /dev/null 2>&1 && echo "     📡 MCP: $server_name connected" || echo "     ⚠️  MCP: $server_name failed"
+            fi
+        done
+
+        # Attach knowledge base if this is the docs-assistant
+        if [ "$name" = "docs-assistant" ] && [ -n "${KB_ID:-}" ]; then
+            curl -s -X PUT "${BONITO_URL}/api/agents/${agent_id}" \
+                -H "$AUTH_HEADER" \
+                -H "Content-Type: application/json" \
+                -d "{\"knowledge_base_ids\": [\"$KB_ID\"]}" > /dev/null 2>&1 \
+                && echo "     📚 Knowledge base attached" || echo "     ⚠️  KB attach failed"
+        fi
     else
-        echo "    ❌ Failed (HTTP $http_code)"
-        echo "    $body" | head -3
+        echo "     ❌ Failed (HTTP $http_code)"
+        echo "     $(echo "$body" | jq -r '.error.message // .' 2>/dev/null | head -1)"
         return 1
     fi
 }
 
-# Deploy knowledge base for Docs Assistant
-deploy_kb() {
-    echo "  Setting up knowledge base..."
+# ── Main ────────────────────────────────────────────────────
 
-    local kb_response
-    kb_response=$(curl -s -w "\n%{http_code}" \
-        -X POST "${BONITO_URL}/api/knowledge-bases" \
-        -H "Authorization: Bearer ${API_KEY}" \
-        -H "Content-Type: application/json" \
-        -d '{
-            "name": "atlas-internal-docs",
-            "description": "Internal engineering documentation for Atlas",
-            "embedding_model": "text-embedding-3-small"
-        }')
+find_or_create_project
 
-    local http_code
-    http_code=$(echo "$kb_response" | tail -1)
-    local kb_body
-    kb_body=$(echo "$kb_response" | sed '$d')
-
-    if [[ "$http_code" =~ ^2 ]]; then
-        echo "    ✅ Knowledge base created"
-
-        # Upload sample docs
-        local kb_id
-        kb_id=$(echo "$kb_body" | jq -r '.id // .knowledge_base.id // "atlas-internal-docs"')
-        
-        for doc in agents/docs-assistant/sample-docs/*.md; do
-            local doc_name
-            doc_name=$(basename "$doc")
-            echo "    📄 Uploading $doc_name..."
-            curl -s -X POST "${BONITO_URL}/api/knowledge-bases/${kb_id}/documents" \
-                -H "Authorization: Bearer ${API_KEY}" \
-                -H "Content-Type: multipart/form-data" \
-                -F "file=@$doc" > /dev/null
-        done
-        echo "    ✅ Documents uploaded"
-    else
-        echo "    ⚠️  KB creation returned HTTP $http_code (may already exist)"
-    fi
-}
-
-echo "Deploying Atlas agents to Bonito..."
+KB_ID=""
+deploy_kb
 echo ""
 
-# Deploy in order: simple agents first, then orchestrator
+echo "🤖 Deploying agents..."
 AGENTS=(
     "incident-responder"
     "code-reviewer"
@@ -166,11 +241,6 @@ AGENTS=(
 )
 
 FAILED=0
-
-# Deploy KB first
-deploy_kb
-echo ""
-
 for agent in "${AGENTS[@]}"; do
     if ! deploy_agent "$agent"; then
         FAILED=$((FAILED + 1))
@@ -182,8 +252,9 @@ if [ "$FAILED" -eq 0 ]; then
     echo "✅ All ${#AGENTS[@]} agents deployed successfully."
     echo ""
     echo "Next steps:"
-    echo "  1. Configure webhooks (see docs/BONITO-SETUP.md)"
+    echo "  1. Visit your Bonito dashboard to chat with agents"
     echo "  2. Test agents: ./scripts/test-agents.sh"
+    echo "  3. Connect MCP servers for live integrations (GitHub, Slack, etc.)"
 else
     echo "⚠️  $FAILED agent(s) failed to deploy. Check the output above."
 fi

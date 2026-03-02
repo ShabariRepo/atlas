@@ -29,7 +29,7 @@ gateway:
       models: [llama-3.3-70b-versatile, mixtral-8x7b-32768]
       api_key: ${GROQ_API_KEY}
 
-    - name: aws-bedrock
+    - name: aws
       priority: 3
       models: [anthropic.claude-sonnet-4-20250514-v2:0, amazon.titan-text-express-v1]
       region: ${AWS_REGION}
