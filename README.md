@@ -72,8 +72,8 @@ Atlas is 35 files and ~4,800 lines of config and prompts. The equivalent DIY sys
 ### Prerequisites
 
 - A [Bonito account](https://getbonito.com/signup) (free tier works for testing)
-- API keys for your providers (or use [Bonito Managed Inference](https://getbonito.com/docs/managed-inference) - no keys needed)
-- GitHub token (for code review and deploy monitoring)
+- At least one AI provider API key (or use [Bonito Managed Inference](https://getbonito.com/docs/managed-inference) - no keys needed)
+- Docker (optional, for local mock MCP servers)
 
 ### 1. Clone and configure
 
@@ -81,37 +81,57 @@ Atlas is 35 files and ~4,800 lines of config and prompts. The equivalent DIY sys
 git clone https://github.com/ShabariRepo/atlas.git
 cd atlas
 cp .env.example .env
-# Edit .env with your Bonito API key and provider credentials
 ```
+
+Edit `.env` with your Bonito credentials and at least one provider key (Groq is free and fast for testing).
 
 ### 2. Deploy to Bonito
 
+**Option A: CLI (recommended)**
+
 ```bash
-# Install Bonito CLI (https://getbonito.com/docs/cli)
 pip install bonito-cli
-
-# Authenticate with your Bonito account
 bonito auth login
-
-# Deploy all agents from the declarative config
 bonito deploy -f bonito.yaml
 ```
 
-### 3. Test it
+The CLI reads `bonito.yaml` and creates providers, knowledge bases, agents, and MCP server connections in the right order. Use `--dry-run` to validate first.
+
+**Option B: Shell script**
 
 ```bash
-# Run the test suite against your deployed agents
+./scripts/deploy-agents.sh
+```
+
+Same result, no CLI install required. Authenticates via `BONITO_EMAIL` / `BONITO_PASSWORD` in your `.env`.
+
+### 3. (Optional) Start mock MCP servers
+
+Atlas ships mock MCP servers so you can test tool integrations locally without real PagerDuty/GitHub/Slack/Jira accounts:
+
+```bash
+docker compose -f docker-compose.mcp.yml up -d
+```
+
+This starts 4 local MCP servers (GitHub :3100, PagerDuty :3101, Slack :3102, Jira :3103). The default MCP URLs in `bonito.yaml` already point to these.
+
+See [mcp-servers/README.md](./mcp-servers/README.md) for details.
+
+### 4. Test it
+
+```bash
 ./scripts/test-agents.sh
 ```
 
-### 4. Connect your tools
+### 5. Connect real tools
 
+When you're ready to go beyond mocks:
+- Swap MCP URLs in `.env` for real servers (or use hosted MCP providers)
 - Point PagerDuty/OpsGenie webhooks to your Bonito agent endpoint
-- Add the GitHub webhook for PR events and deploy notifications
+- Add GitHub webhooks for PR events and deploy notifications
 - Invite the Slack bot to your channels
-- Or just use the Command Center widget and ask questions directly
 
-> **Want it even simpler?** [Bonito Managed Inference](https://getbonito.com/docs/managed-inference) handles provider credentials for you. Skip the API keys entirely - Bonito routes to the best available model automatically.
+> **Want it even simpler?** [Bonito Managed Inference](https://getbonito.com/docs/managed-inference) handles provider credentials for you. Skip the API keys entirely.
 
 ## How It Works
 
@@ -173,8 +193,8 @@ gateway:
     strategy: cost-optimized
 
 mcp_servers:
-  github: { transport: sse, url: https://mcp.getbonito.com/github }
-  slack:  { transport: sse, url: https://mcp.getbonito.com/slack }
+  github:    { transport: sse, url: ${MCP_GITHUB_URL:-http://localhost:3100/sse} }
+  pagerduty: { transport: sse, url: ${MCP_PAGERDUTY_URL:-http://localhost:3101/sse} }
 
 agents:
   incident-responder:
