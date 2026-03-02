@@ -46,7 +46,10 @@ echo ""
 
 echo "Bonito:"
 check_var "BONITO_API_KEY" "required"
-check_var "BONITO_API_URL" "required"
+check_var "BONITO_API_URL" "optional"
+if [ -z "${BONITO_API_URL:-}" ]; then
+    echo "  ℹ️  BONITO_API_URL not set, will use http://localhost:8001 (local dev)"
+fi
 echo ""
 
 echo "Providers (need at least one, or use managed inference):"

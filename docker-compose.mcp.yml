@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  # GitHub MCP Server - Using a mock implementation
+  mcp-github:
+    image: node:18-alpine
+    ports:
+      - "3100:3100"
+    environment:
+      - PORT=3100
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-mock-token}
+    volumes:
+      - ./mcp-servers/github:/app
+    working_dir: /app
+    command: >
+      sh -c "
+        if [ ! -f package.json ]; then
+          npm init -y
+          npm install express cors
+        fi
+        node server.js
+      "
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Slack/Notifications MCP Server - Mock implementation
+  mcp-slack:
+    image: node:18-alpine
+    ports:
+      - "3102:3102"
+    environment:
+      - PORT=3102
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-mock-token}
+    volumes:
+      - ./mcp-servers/slack:/app
+    working_dir: /app
+    command: >
+      sh -c "
+        if [ ! -f package.json ]; then
+          npm init -y
+          npm install express cors
+        fi
+        node server.js
+      "
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3102/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PagerDuty MCP Server - Mock implementation
+  mcp-pagerduty:
+    image: node:18-alpine
+    ports:
+      - "3101:3101"
+    environment:
+      - PORT=3101
+      - PAGERDUTY_API_KEY=${PAGERDUTY_API_KEY:-mock-key}
+    volumes:
+      - ./mcp-servers/pagerduty:/app
+    working_dir: /app
+    command: >
+      sh -c "
+        if [ ! -f package.json ]; then
+          npm init -y
+          npm install express cors
+        fi
+        node server.js
+      "
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3101/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Jira MCP Server - Mock implementation
+  mcp-jira:
+    image: node:18-alpine
+    ports:
+      - "3103:3103"
+    environment:
+      - PORT=3103
+      - JIRA_BASE_URL=${JIRA_BASE_URL:-https://mock.atlassian.net}
+      - JIRA_EMAIL=${JIRA_EMAIL:-mock@example.com}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN:-mock-token}
+    volumes:
+      - ./mcp-servers/jira:/app
+    working_dir: /app
+    command: >
+      sh -c "
+        if [ ! -f package.json ]; then
+          npm init -y
+          npm install express cors
+        fi
+        node server.js
+      "
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3103/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  default:
+    name: atlas-mcp
+    external: false
