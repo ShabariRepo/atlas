@@ -1,0 +1,116 @@
+{
+  "agent": {
+    "id": "atlas-code-reviewer",
+    "name": "Code Reviewer",
+    "type": "bonbon",
+    "mode": "advanced",
+    "version": "1.0.0"
+  },
+  "model": {
+    "primary": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-20250514",
+      "reason": "Superior code comprehension and nuanced review feedback"
+    },
+    "fallback": {
+      "provider": "openai",
+      "model": "gpt-4o"
+    },
+    "parameters": {
+      "temperature": 0.3,
+      "max_tokens": 8192,
+      "top_p": 0.95
+    }
+  },
+  "mcp_servers": [
+    "github"
+  ],
+  "triggers": [
+    {
+      "type": "webhook",
+      "path": "/webhooks/github/pr",
+      "source": "github",
+      "events": [
+        "pull_request.opened",
+        "pull_request.synchronize"
+      ],
+      "validation": {
+        "signature_header": "X-Hub-Signature-256",
+        "secret": "${GITHUB_WEBHOOK_SECRET}"
+      }
+    },
+    {
+      "type": "slash_command",
+      "command": "/review",
+      "description": "Trigger a review on a specific PR",
+      "parameters": [
+        {
+          "name": "pr_number",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "focus",
+          "type": "string",
+          "required": false,
+          "options": ["security", "performance", "all"],
+          "default": "all"
+        }
+      ]
+    }
+  ],
+  "review": {
+    "checks": [
+      {
+        "name": "security",
+        "enabled": true,
+        "severity": "high",
+        "description": "SQL injection, XSS, hardcoded secrets, insecure dependencies"
+      },
+      {
+        "name": "performance",
+        "enabled": true,
+        "severity": "medium",
+        "description": "N+1 queries, unnecessary allocations, missing indexes"
+      },
+      {
+        "name": "error_handling",
+        "enabled": true,
+        "severity": "medium",
+        "description": "Unhandled exceptions, missing error boundaries, silent failures"
+      },
+      {
+        "name": "naming_conventions",
+        "enabled": true,
+        "severity": "low",
+        "description": "Variable/function naming, consistency with codebase conventions"
+      },
+      {
+        "name": "test_coverage",
+        "enabled": true,
+        "severity": "medium",
+        "description": "Missing tests for new logic, edge cases, regression tests"
+      }
+    ],
+    "auto_approve": false,
+    "max_files": 50,
+    "max_diff_lines": 5000,
+    "ignore_patterns": [
+      "*.lock",
+      "*.min.js",
+      "*.min.css",
+      "dist/**",
+      "build/**",
+      "vendor/**",
+      "node_modules/**",
+      "*.generated.*",
+      "**/*.snap"
+    ],
+    "comment_style": {
+      "inline": true,
+      "summary": true,
+      "severity_labels": true,
+      "suggestion_format": "github_suggestion"
+    }
+  }
+}

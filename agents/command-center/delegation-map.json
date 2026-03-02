@@ -1,0 +1,128 @@
+{
+  "version": "1.0.0",
+  "description": "Maps intents and keywords to delegate agents for the Atlas Command Center",
+  "routing_rules": [
+    {
+      "intent": "incident_management",
+      "agent": "atlas-incident-responder",
+      "priority": "critical",
+      "keywords": [
+        "alert", "incident", "page", "pager", "outage", "down",
+        "P1", "P2", "P3", "P4", "severity", "on-call", "oncall",
+        "PagerDuty", "OpsGenie", "triage", "escalate", "war room",
+        "SLA", "SLO", "error rate", "5xx", "timeout"
+      ],
+      "patterns": [
+        "there's a .* alert",
+        "we're getting paged",
+        ".* is down",
+        "production .* broken",
+        "customer.* reporting",
+        "error rate .* spike"
+      ],
+      "examples": [
+        "There's a P1 alert on the API",
+        "Production database is down",
+        "We're getting paged about latency",
+        "Customers are reporting 500 errors",
+        "Who is on-call right now?"
+      ]
+    },
+    {
+      "intent": "code_review",
+      "agent": "atlas-code-reviewer",
+      "priority": "normal",
+      "keywords": [
+        "PR", "pull request", "review", "code review", "diff",
+        "merge", "branch", "commit", "security review",
+        "code quality", "lint", "refactor"
+      ],
+      "patterns": [
+        "review PR #?\\d+",
+        "check .* pull request",
+        "security review .* PR",
+        "code review for .*",
+        "look at .* diff"
+      ],
+      "examples": [
+        "Review PR #42",
+        "Can you check the security of PR #108?",
+        "What open PRs need review?",
+        "Review the latest PR on the auth service"
+      ]
+    },
+    {
+      "intent": "documentation",
+      "agent": "atlas-docs-assistant",
+      "priority": "normal",
+      "keywords": [
+        "how do I", "what is", "docs", "documentation", "runbook",
+        "guide", "configure", "setup", "architecture", "API",
+        "tutorial", "walkthrough", "explain", "where can I find"
+      ],
+      "patterns": [
+        "how do I .*",
+        "what is .*",
+        "how to .*",
+        "where .* documentation",
+        "can you explain .*",
+        "walk me through .*"
+      ],
+      "examples": [
+        "How do I configure Redis caching?",
+        "What's our deployment process?",
+        "Walk me through incident response",
+        "Where's the API documentation for user service?"
+      ]
+    },
+    {
+      "intent": "deployment_monitoring",
+      "agent": "atlas-deploy-monitor",
+      "priority": "normal",
+      "keywords": [
+        "deploy", "deployment", "release", "ship", "pipeline",
+        "CI/CD", "rollback", "DORA", "GitHub Actions", "CircleCI",
+        "production status", "staging", "build", "workflow"
+      ],
+      "patterns": [
+        "status of (prod|production|staging)",
+        "did .* deploy",
+        "how many deploys",
+        "latest (deploy|release|build)",
+        "DORA metrics",
+        "deploy .* (today|this week|yesterday)"
+      ],
+      "examples": [
+        "What's the status of production?",
+        "How many deploys happened this week?",
+        "Did the latest deploy succeed?",
+        "What's our DORA score?",
+        "Roll back the last deploy"
+      ]
+    }
+  ],
+  "multi_agent_rules": [
+    {
+      "description": "Production status check — combine deploy status with incident check",
+      "patterns": ["status of prod", "is production (ok|healthy|stable)"],
+      "agents": ["atlas-deploy-monitor", "atlas-incident-responder"],
+      "synthesis": "Combine recent deploy info with any active incidents for a full picture"
+    },
+    {
+      "description": "Post-deploy issues — check what deployed and triage the issue",
+      "patterns": ["deployed and .* (broken|failing|slow)", "since the last deploy"],
+      "agents": ["atlas-deploy-monitor", "atlas-incident-responder"],
+      "synthesis": "Identify what changed (deploy monitor) and assess the issue (incident responder)"
+    },
+    {
+      "description": "Rollback procedure — get docs and current deploy status",
+      "patterns": ["how to roll back", "rollback procedure"],
+      "agents": ["atlas-docs-assistant", "atlas-deploy-monitor"],
+      "synthesis": "Provide the procedure (docs) with current deployment context (monitor)"
+    }
+  ],
+  "fallback": {
+    "action": "ask_clarification",
+    "message": "I'm not sure which team can help with that. Could you give me more context? I can help with incidents, code reviews, documentation, and deployments."
+  }
+}

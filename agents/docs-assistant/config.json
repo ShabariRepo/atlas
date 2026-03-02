@@ -1,0 +1,102 @@
+{
+  "agent": {
+    "id": "atlas-docs-assistant",
+    "name": "Docs Assistant",
+    "type": "bonbon",
+    "mode": "simple",
+    "version": "1.0.0"
+  },
+  "model": {
+    "primary": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "reason": "Cost-efficient for RAG-grounded Q&A with high volume"
+    },
+    "fallback": {
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile"
+    },
+    "parameters": {
+      "temperature": 0.4,
+      "max_tokens": 4096,
+      "top_p": 0.9
+    }
+  },
+  "rag": {
+    "knowledge_base": "internal-docs",
+    "retrieval": {
+      "top_k": 5,
+      "similarity_threshold": 0.72,
+      "reranking": true,
+      "rerank_model": "cross-encoder"
+    },
+    "sources": [
+      {
+        "type": "directory",
+        "path": "./sample-docs/",
+        "glob": "**/*.md",
+        "metadata": {
+          "category": "runbooks"
+        }
+      },
+      {
+        "type": "confluence",
+        "base_url": "${CONFLUENCE_BASE_URL}",
+        "space_key": "ENG",
+        "auth": {
+          "email": "${JIRA_EMAIL}",
+          "token": "${JIRA_API_TOKEN}"
+        },
+        "sync_interval": "6h"
+      },
+      {
+        "type": "notion",
+        "token": "${NOTION_TOKEN}",
+        "database_ids": ["${NOTION_DOCS_DB}"],
+        "sync_interval": "6h"
+      }
+    ],
+    "embedding": {
+      "model": "text-embedding-3-small",
+      "provider": "openai",
+      "dimensions": 1536
+    },
+    "chunking": {
+      "strategy": "semantic",
+      "max_chunk_size": 1024,
+      "overlap": 128,
+      "separators": ["## ", "### ", "\n\n"]
+    }
+  },
+  "widget": {
+    "enabled": true,
+    "title": "Engineering Docs",
+    "subtitle": "Ask about runbooks, APIs, and architecture",
+    "placeholder": "How do I configure Redis caching?",
+    "theme": "light",
+    "position": "bottom-right",
+    "branding": {
+      "logo_url": "https://your-org.com/logo.svg",
+      "primary_color": "#2563EB",
+      "font_family": "Inter, sans-serif"
+    },
+    "allowed_domains": [
+      "*.your-org.com",
+      "localhost",
+      "localhost:3000"
+    ],
+    "welcome_message": "👋 I can help you find answers in our engineering docs. Ask me anything about our runbooks, APIs, or architecture.",
+    "suggested_questions": [
+      "How do I deploy to production?",
+      "What's our Redis caching strategy?",
+      "Walk me through the incident response process",
+      "How do I set up a new microservice?"
+    ]
+  },
+  "behavior": {
+    "citation_style": "inline",
+    "max_sources_cited": 3,
+    "fallback_message": "I couldn't find specific documentation on that topic. You might want to check with the team in #engineering or create a doc request.",
+    "confidence_threshold": 0.6
+  }
+}

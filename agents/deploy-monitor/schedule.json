@@ -1,0 +1,68 @@
+{
+  "schedules": [
+    {
+      "id": "daily-deploy-summary",
+      "description": "Post daily deployment summary to Slack",
+      "cron": "0 9 * * 1-5",
+      "timezone": "America/New_York",
+      "task": "daily_deploy_summary",
+      "enabled": true,
+      "config": {
+        "period": "last_24h",
+        "channel": "${SLACK_CHANNEL_DEPLOYS}",
+        "include_metrics": true,
+        "skip_if_no_deploys": true
+      }
+    },
+    {
+      "id": "weekly-deploy-recap",
+      "description": "Post weekly DORA metrics recap on Monday morning",
+      "cron": "0 10 * * 1",
+      "timezone": "America/New_York",
+      "task": "weekly_deploy_recap",
+      "enabled": true,
+      "config": {
+        "period": "last_7d",
+        "channel": "${SLACK_CHANNEL_DEPLOYS}",
+        "include_dora_metrics": true,
+        "compare_to": "previous_week",
+        "include_trends": true
+      }
+    },
+    {
+      "id": "monthly-report",
+      "description": "Generate monthly deployment health report",
+      "cron": "0 10 1 * *",
+      "timezone": "America/New_York",
+      "task": "monthly_report",
+      "enabled": false,
+      "config": {
+        "period": "last_30d",
+        "channel": "${SLACK_CHANNEL_GENERAL}",
+        "format": "detailed",
+        "include_per_repo_breakdown": true
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "id": "deploy-complete",
+      "event": "deployment_status",
+      "filter": {
+        "state": ["success", "failure", "error"]
+      },
+      "task": "on_deploy_complete",
+      "enabled": true
+    },
+    {
+      "id": "workflow-complete",
+      "event": "workflow_run.completed",
+      "filter": {
+        "workflow_name": ["deploy", "release", "cd-*"],
+        "conclusion": ["success", "failure"]
+      },
+      "task": "on_deploy_complete",
+      "enabled": true
+    }
+  ]
+}

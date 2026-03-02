@@ -1,0 +1,239 @@
+{
+  "agent": {
+    "id": "atlas-deploy-monitor",
+    "name": "Deploy Monitor",
+    "type": "bonbon",
+    "mode": "advanced",
+    "version": "1.0.0"
+  },
+  "model": {
+    "primary": {
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "reason": "Fast summaries and metric aggregation"
+    },
+    "fallback": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "parameters": {
+      "temperature": 0.2,
+      "max_tokens": 2048,
+      "top_p": 0.9
+    }
+  },
+  "mcp_servers": [
+    "github",
+    "slack"
+  ],
+  "triggers": [
+    {
+      "type": "webhook",
+      "path": "/webhooks/github/deploy",
+      "source": "github",
+      "events": [
+        "deployment_status",
+        "workflow_run.completed"
+      ],
+      "validation": {
+        "signature_header": "X-Hub-Signature-256",
+        "secret": "${GITHUB_WEBHOOK_SECRET}"
+      }
+    },
+    {
+      "type": "schedule",
+      "id": "daily-summary",
+      "cron": "0 9 * * 1-5",
+      "timezone": "America/New_York",
+      "task": "daily_deploy_summary",
+      "description": "Weekday morning deployment summary"
+    },
+    {
+      "type": "schedule",
+      "id": "weekly-recap",
+      "cron": "0 10 * * 1",
+      "timezone": "America/New_York",
+      "task": "weekly_deploy_recap",
+      "description": "Monday morning weekly deployment recap with DORA metrics"
+    }
+  ],
+  "behavior": {
+    "on_deploy_complete": {
+      "steps": [
+        {
+          "action": "collect_deploy_metadata",
+          "fields": [
+            "repo",
+            "branch",
+            "commit_sha",
+            "author",
+            "environment",
+            "status",
+            "duration",
+            "changed_files"
+          ]
+        },
+        {
+          "action": "assess_risk",
+          "factors": [
+            "files_changed_count",
+            "includes_migration",
+            "includes_config_change",
+            "is_friday",
+            "deploy_frequency_today"
+          ]
+        },
+        {
+          "action": "post_slack_summary",
+          "channel": "${SLACK_CHANNEL_DEPLOYS}",
+          "template": "deploy_complete"
+        },
+        {
+          "action": "update_metrics",
+          "metrics": [
+            "deploy_count",
+            "deploy_duration",
+            "deploy_status"
+          ]
+        }
+      ]
+    },
+    "on_deploy_failed": {
+      "steps": [
+        {
+          "action": "analyze_failure",
+          "include": ["logs_tail", "changed_files", "recent_deploys"]
+        },
+        {
+          "action": "post_slack_alert",
+          "channel": "${SLACK_CHANNEL_DEPLOYS}",
+          "template": "deploy_failed",
+          "mention": "@here"
+        }
+      ]
+    },
+    "daily_deploy_summary": {
+      "steps": [
+        {
+          "action": "aggregate_deploys",
+          "period": "last_24h"
+        },
+        {
+          "action": "compute_metrics",
+          "metrics": ["count", "success_rate", "avg_duration", "authors"]
+        },
+        {
+          "action": "post_slack_summary",
+          "channel": "${SLACK_CHANNEL_DEPLOYS}",
+          "template": "daily_summary"
+        }
+      ]
+    },
+    "weekly_deploy_recap": {
+      "steps": [
+        {
+          "action": "aggregate_deploys",
+          "period": "last_7d"
+        },
+        {
+          "action": "compute_dora_metrics",
+          "metrics": [
+            "deployment_frequency",
+            "lead_time_for_changes",
+            "change_failure_rate",
+            "mean_time_to_recovery"
+          ]
+        },
+        {
+          "action": "generate_trends",
+          "compare_to": "previous_week"
+        },
+        {
+          "action": "post_slack_summary",
+          "channel": "${SLACK_CHANNEL_DEPLOYS}",
+          "template": "weekly_recap"
+        }
+      ]
+    }
+  },
+  "metrics": {
+    "track": [
+      {
+        "name": "deploy_frequency",
+        "type": "counter",
+        "labels": ["repo", "environment", "status"]
+      },
+      {
+        "name": "deploy_duration_seconds",
+        "type": "histogram",
+        "labels": ["repo", "environment"],
+        "buckets": [60, 120, 300, 600, 900, 1800]
+      },
+      {
+        "name": "change_failure_rate",
+        "type": "gauge",
+        "labels": ["repo"],
+        "window": "7d"
+      },
+      {
+        "name": "mean_time_to_recovery_seconds",
+        "type": "gauge",
+        "labels": ["repo"],
+        "window": "30d"
+      }
+    ],
+    "retention_days": 90,
+    "export": {
+      "prometheus": true,
+      "bonito_dashboard": true
+    }
+  },
+  "templates": {
+    "deploy_complete": {
+      "blocks": [
+        {
+          "type": "header",
+          "text": "{{status_emoji}} Deploy: {{repo}} → {{environment}}"
+        },
+        {
+          "type": "section",
+          "fields": [
+            { "label": "Author", "value": "{{author}}" },
+            { "label": "Branch", "value": "`{{branch}}`" },
+            { "label": "Duration", "value": "{{duration}}" },
+            { "label": "Commit", "value": "`{{commit_sha_short}}`" }
+          ]
+        },
+        {
+          "type": "section",
+          "text": "{{commit_message}}"
+        },
+        {
+          "type": "context",
+          "text": "{{files_changed}} files changed | Risk: {{risk_level}}"
+        }
+      ]
+    },
+    "daily_summary": {
+      "blocks": [
+        {
+          "type": "header",
+          "text": "📊 Daily Deploy Summary — {{date}}"
+        },
+        {
+          "type": "section",
+          "fields": [
+            { "label": "Total Deploys", "value": "{{total_count}}" },
+            { "label": "Success Rate", "value": "{{success_rate}}%" },
+            { "label": "Avg Duration", "value": "{{avg_duration}}" },
+            { "label": "Contributors", "value": "{{author_count}}" }
+          ]
+        },
+        {
+          "type": "section",
+          "text": "{{ai_summary}}"
+        }
+      ]
+    }
+  }
+}

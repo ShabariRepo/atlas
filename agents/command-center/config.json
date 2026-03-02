@@ -1,0 +1,153 @@
+{
+  "agent": {
+    "id": "atlas-command-center",
+    "name": "Atlas Command Center",
+    "type": "bonobot",
+    "version": "1.0.0"
+  },
+  "model": {
+    "primary": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-20250514",
+      "reason": "Excellent at intent classification, instruction following, and response synthesis"
+    },
+    "fallback": {
+      "provider": "openai",
+      "model": "gpt-4o"
+    },
+    "parameters": {
+      "temperature": 0.1,
+      "max_tokens": 4096,
+      "top_p": 0.9
+    }
+  },
+  "orchestration": {
+    "delegates": [
+      {
+        "agent_id": "atlas-incident-responder",
+        "name": "Incident Responder",
+        "domains": [
+          "incidents",
+          "alerts",
+          "on-call",
+          "pages",
+          "outages",
+          "severity",
+          "pagerduty",
+          "opsgenie",
+          "downtime",
+          "SLA"
+        ],
+        "description": "Handles incident triage, ticket creation, and team notification",
+        "examples": [
+          "There's a P1 alert on the API gateway",
+          "We're getting paged about database latency",
+          "What incidents are open right now?",
+          "Acknowledge the PagerDuty alert for auth-service"
+        ]
+      },
+      {
+        "agent_id": "atlas-code-reviewer",
+        "name": "Code Reviewer",
+        "domains": [
+          "pull-requests",
+          "code-review",
+          "PRs",
+          "diffs",
+          "security-review",
+          "code-quality",
+          "merge",
+          "GitHub"
+        ],
+        "description": "Reviews pull requests for security, performance, and quality",
+        "examples": [
+          "Review PR #42",
+          "Check the security of the auth changes in PR #108",
+          "What PRs are open and need review?",
+          "Do a performance review of the database migration PR"
+        ]
+      },
+      {
+        "agent_id": "atlas-docs-assistant",
+        "name": "Docs Assistant",
+        "domains": [
+          "documentation",
+          "how-to",
+          "runbooks",
+          "architecture",
+          "configuration",
+          "setup",
+          "guide",
+          "API-docs"
+        ],
+        "description": "Answers questions using internal documentation and runbooks",
+        "examples": [
+          "How do I configure Redis caching?",
+          "What's our deploy process?",
+          "Walk me through the incident response steps",
+          "Where's the API documentation for the user service?"
+        ]
+      },
+      {
+        "agent_id": "atlas-deploy-monitor",
+        "name": "Deploy Monitor",
+        "domains": [
+          "deployments",
+          "releases",
+          "CI/CD",
+          "pipelines",
+          "rollbacks",
+          "DORA",
+          "deploy-status",
+          "GitHub-Actions"
+        ],
+        "description": "Tracks deployments, reports metrics, and provides delivery insights",
+        "examples": [
+          "What's the status of prod?",
+          "How many deploys did we do this week?",
+          "What's our change failure rate?",
+          "Did the latest deploy to production succeed?",
+          "Show me DORA metrics for this month"
+        ]
+      }
+    ],
+    "strategy": {
+      "routing": "intent-classification",
+      "allow_multi_agent": true,
+      "synthesize_responses": true,
+      "max_delegation_depth": 2,
+      "confidence_threshold": 0.7,
+      "ambiguity_handling": "ask_clarification"
+    }
+  },
+  "channels": [
+    {
+      "type": "slack",
+      "commands": ["/atlas", "/ops"],
+      "bot_mention": true,
+      "direct_message": true,
+      "channels": ["${SLACK_CHANNEL_GENERAL}"]
+    },
+    {
+      "type": "widget",
+      "enabled": true,
+      "title": "Atlas Command Center",
+      "placeholder": "Ask anything about your infrastructure...",
+      "theme": "dark",
+      "position": "bottom-right",
+      "suggested_prompts": [
+        "What's the status of production?",
+        "Review the latest open PR",
+        "How do I deploy a hotfix?",
+        "Are there any open incidents?"
+      ]
+    }
+  ],
+  "behavior": {
+    "greeting": "I'm Atlas, your DevOps command center. I can help with incidents, code reviews, documentation, and deployments. What do you need?",
+    "unknown_intent": "I'm not sure which team can help with that. Could you clarify? I can help with:\n• **Incidents** — alert triage, on-call, outages\n• **Code Review** — PR review, security analysis\n• **Documentation** — runbooks, how-to guides\n• **Deployments** — deploy status, metrics, rollbacks",
+    "multi_agent_intro": "Let me check with multiple teams on this...",
+    "delegation_transparency": true,
+    "show_routing_reason": true
+  }
+}

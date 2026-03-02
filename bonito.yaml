@@ -1,0 +1,328 @@
+# ============================================================
+# Atlas - Declarative Agent Configuration
+# ============================================================
+# This file defines the entire Atlas agent stack.
+# Deploy with: bonito deploy -f bonito.yaml
+# ============================================================
+
+version: "1"
+name: atlas
+description: AI-Powered DevOps Command Center
+
+# ── Gateway Configuration ────────────────────────────────────
+# Bonito Gateway routes requests across providers with
+# automatic fallback, load balancing, and cost optimization.
+gateway:
+  providers:
+    - name: anthropic
+      priority: 1
+      models: [claude-sonnet-4-20250514, claude-opus-4-20250514]
+      api_key: ${ANTHROPIC_API_KEY}
+
+    - name: openai
+      priority: 2
+      models: [gpt-4o, gpt-4o-mini]
+      api_key: ${OPENAI_API_KEY}
+
+    - name: groq
+      priority: 1
+      models: [llama-3.3-70b-versatile, mixtral-8x7b-32768]
+      api_key: ${GROQ_API_KEY}
+
+    - name: aws-bedrock
+      priority: 3
+      models: [anthropic.claude-sonnet-4-20250514-v2:0, amazon.titan-text-express-v1]
+      region: ${AWS_REGION}
+      access_key: ${AWS_ACCESS_KEY_ID}
+      secret_key: ${AWS_SECRET_ACCESS_KEY}
+
+  routing:
+    strategy: cost-optimized    # cost-optimized | latency-first | quality-first
+    fallback: true
+    retry_attempts: 2
+    timeout_ms: 30000
+
+  rate_limits:
+    requests_per_minute: 500
+    tokens_per_minute: 200000
+
+# ── MCP Servers ──────────────────────────────────────────────
+# External tool servers that agents can connect to.
+mcp_servers:
+  github:
+    transport: sse
+    url: https://mcp.getbonito.com/github
+    auth:
+      token: ${GITHUB_TOKEN}
+    capabilities:
+      - pull_requests
+      - issues
+      - code_search
+      - actions
+
+  pagerduty:
+    transport: sse
+    url: https://mcp.getbonito.com/pagerduty
+    auth:
+      token: ${PAGERDUTY_API_KEY}
+    capabilities:
+      - incidents
+      - services
+      - escalation_policies
+
+  slack:
+    transport: sse
+    url: https://mcp.getbonito.com/slack
+    auth:
+      token: ${SLACK_BOT_TOKEN}
+    capabilities:
+      - send_message
+      - channels
+      - threads
+      - reactions
+
+  jira:
+    transport: sse
+    url: https://mcp.getbonito.com/jira
+    auth:
+      base_url: ${JIRA_BASE_URL}
+      email: ${JIRA_EMAIL}
+      token: ${JIRA_API_TOKEN}
+    capabilities:
+      - create_issue
+      - update_issue
+      - search
+      - transitions
+
+# ── Knowledge Bases (RAG) ────────────────────────────────────
+knowledge_bases:
+  internal-docs:
+    description: Internal runbooks, API docs, and architecture documentation
+    sources:
+      - type: directory
+        path: ./agents/docs-assistant/sample-docs/
+        glob: "**/*.md"
+      - type: confluence
+        base_url: ${CONFLUENCE_BASE_URL}
+        space_key: ENG
+        auth:
+          email: ${JIRA_EMAIL}
+          token: ${JIRA_API_TOKEN}
+    embedding:
+      model: text-embedding-3-small
+      provider: openai
+    chunking:
+      strategy: semantic
+      max_chunk_size: 1024
+      overlap: 128
+
+# ── Agents ───────────────────────────────────────────────────
+agents:
+  # ── Incident Responder ───────────────────────────────────
+  incident-responder:
+    type: bonbon
+    mode: simple
+    display_name: Incident Responder
+    description: Monitors alerts, triages severity, creates tickets, notifies team
+    system_prompt: ./agents/incident-responder/system-prompt.md
+
+    model:
+      primary: groq/llama-3.3-70b-versatile    # Fast triage
+      fallback: openai/gpt-4o-mini
+    parameters:
+      temperature: 0.2
+      max_tokens: 2048
+
+    mcp_servers:
+      - pagerduty
+      - slack
+      - jira
+
+    triggers:
+      - type: webhook
+        path: /webhooks/pagerduty
+        source: pagerduty
+        events: [incident.triggered, incident.acknowledged, incident.resolved]
+      - type: webhook
+        path: /webhooks/opsgenie
+        source: opsgenie
+        events: [alert.created, alert.acknowledged]
+
+    actions:
+      on_alert:
+        - triage_severity
+        - create_ticket
+        - notify_slack
+        - suggest_runbook
+
+  # ── Code Reviewer ────────────────────────────────────────
+  code-reviewer:
+    type: bonbon
+    mode: advanced
+    display_name: Code Reviewer
+    description: Reviews PRs for security, performance, and style issues
+    system_prompt: ./agents/code-reviewer/system-prompt.md
+
+    model:
+      primary: anthropic/claude-sonnet-4-20250514  # Deep analysis
+      fallback: openai/gpt-4o
+    parameters:
+      temperature: 0.3
+      max_tokens: 8192
+
+    mcp_servers:
+      - github
+
+    triggers:
+      - type: webhook
+        path: /webhooks/github/pr
+        source: github
+        events: [pull_request.opened, pull_request.synchronize]
+      - type: slash_command
+        command: /review
+        description: Review a specific PR
+
+    review_config:
+      checks:
+        - security
+        - performance
+        - error_handling
+        - naming_conventions
+        - test_coverage
+      auto_approve: false
+      max_files: 50
+      ignore_patterns:
+        - "*.lock"
+        - "*.min.js"
+        - "dist/**"
+
+  # ── Docs Assistant ───────────────────────────────────────
+  docs-assistant:
+    type: bonbon
+    mode: simple
+    display_name: Docs Assistant
+    description: Answers questions using internal documentation and runbooks
+    system_prompt: ./agents/docs-assistant/system-prompt.md
+
+    model:
+      primary: openai/gpt-4o-mini               # Cost-efficient for Q&A
+      fallback: groq/llama-3.3-70b-versatile
+    parameters:
+      temperature: 0.4
+      max_tokens: 4096
+
+    rag:
+      knowledge_base: internal-docs
+      top_k: 5
+      similarity_threshold: 0.72
+      include_sources: true
+
+    widget:
+      enabled: true
+      title: Engineering Docs
+      placeholder: "Ask about runbooks, APIs, architecture..."
+      theme: light
+      position: bottom-right
+      allowed_domains:
+        - "*.your-org.com"
+        - localhost
+
+  # ── Deploy Monitor ───────────────────────────────────────
+  deploy-monitor:
+    type: bonbon
+    mode: advanced
+    display_name: Deploy Monitor
+    description: Tracks deployments and posts summaries to Slack
+    system_prompt: ./agents/deploy-monitor/system-prompt.md
+
+    model:
+      primary: groq/llama-3.3-70b-versatile      # Fast summaries
+      fallback: openai/gpt-4o-mini
+    parameters:
+      temperature: 0.2
+      max_tokens: 2048
+
+    mcp_servers:
+      - github
+      - slack
+
+    triggers:
+      - type: webhook
+        path: /webhooks/github/deploy
+        source: github
+        events: [deployment_status, workflow_run.completed]
+      - type: schedule
+        cron: "0 9 * * 1-5"                     # Weekday morning summary
+        task: daily_deploy_summary
+      - type: schedule
+        cron: "0 10 * * 1"                       # Monday weekly recap
+        task: weekly_deploy_recap
+
+    metrics:
+      track:
+        - deploy_frequency
+        - failure_rate
+        - mean_time_to_recovery
+        - change_lead_time
+      storage: bonito                             # Uses Bonito's built-in metrics store
+      retention_days: 90
+
+  # ── Command Center (Orchestrator) ────────────────────────
+  command-center:
+    type: bonobot
+    display_name: Atlas Command Center
+    description: Orchestrator that routes requests to the right agent
+    system_prompt: ./agents/command-center/system-prompt.md
+
+    model:
+      primary: anthropic/claude-sonnet-4-20250514  # Smart routing
+      fallback: openai/gpt-4o
+    parameters:
+      temperature: 0.1
+      max_tokens: 4096
+
+    delegates:
+      - agent: incident-responder
+        domains: [incidents, alerts, on-call, pages, outages, severity]
+      - agent: code-reviewer
+        domains: [pull-requests, code-review, PRs, diffs, security-review]
+      - agent: docs-assistant
+        domains: [documentation, how-to, runbooks, architecture, configuration]
+      - agent: deploy-monitor
+        domains: [deployments, releases, CI/CD, pipelines, rollbacks]
+
+    delegation:
+      strategy: intent-classification
+      allow_multi_agent: true                     # Can query multiple agents
+      synthesize_responses: true                  # Combine multi-agent responses
+      max_delegation_depth: 2
+
+    channels:
+      - type: slack
+        commands:
+          - /atlas
+          - /ops
+        bot_mention: true
+      - type: widget
+        enabled: true
+        title: Atlas Command Center
+        placeholder: "Ask anything about your infrastructure..."
+
+# ── Observability ────────────────────────────────────────────
+observability:
+  logging:
+    level: ${ATLAS_LOG_LEVEL}
+    format: json
+    destination: stdout
+
+  tracing:
+    enabled: true
+    provider: bonito                              # Built-in tracing
+    sample_rate: 1.0
+
+  metrics:
+    enabled: true
+    export:
+      - type: prometheus
+        port: 9090
+      - type: bonito-dashboard

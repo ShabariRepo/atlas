@@ -1,0 +1,142 @@
+{
+  "agent": {
+    "id": "atlas-incident-responder",
+    "name": "Incident Responder",
+    "type": "bonbon",
+    "mode": "simple",
+    "version": "1.0.0"
+  },
+  "model": {
+    "primary": {
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "reason": "Low latency for time-critical incident triage"
+    },
+    "fallback": {
+      "provider": "openai",
+      "model": "gpt-4o-mini"
+    },
+    "parameters": {
+      "temperature": 0.2,
+      "max_tokens": 2048,
+      "top_p": 0.9
+    }
+  },
+  "mcp_servers": [
+    "pagerduty",
+    "slack",
+    "jira"
+  ],
+  "triggers": [
+    {
+      "type": "webhook",
+      "path": "/webhooks/pagerduty",
+      "source": "pagerduty",
+      "events": [
+        "incident.triggered",
+        "incident.acknowledged",
+        "incident.resolved"
+      ],
+      "validation": {
+        "signature_header": "X-PagerDuty-Signature",
+        "secret": "${PAGERDUTY_WEBHOOK_SECRET}"
+      }
+    },
+    {
+      "type": "webhook",
+      "path": "/webhooks/opsgenie",
+      "source": "opsgenie",
+      "events": [
+        "alert.created",
+        "alert.acknowledged"
+      ]
+    }
+  ],
+  "behavior": {
+    "on_incident_triggered": {
+      "steps": [
+        {
+          "action": "classify_severity",
+          "output": "severity_level"
+        },
+        {
+          "action": "identify_service",
+          "output": "affected_service"
+        },
+        {
+          "action": "create_ticket",
+          "provider": "jira",
+          "template": {
+            "project": "${JIRA_PROJECT_KEY}",
+            "type": "Bug",
+            "priority_map": {
+              "P1": "Highest",
+              "P2": "High",
+              "P3": "Medium",
+              "P4": "Low"
+            }
+          }
+        },
+        {
+          "action": "notify_slack",
+          "channel": "${SLACK_CHANNEL_INCIDENTS}",
+          "template": "incident_alert",
+          "mention_oncall": true
+        },
+        {
+          "action": "suggest_runbook",
+          "knowledge_base": "internal-docs",
+          "filter": "incident-runbook"
+        }
+      ]
+    },
+    "on_incident_resolved": {
+      "steps": [
+        {
+          "action": "update_ticket",
+          "transition": "Done"
+        },
+        {
+          "action": "notify_slack",
+          "channel": "${SLACK_CHANNEL_INCIDENTS}",
+          "template": "incident_resolved"
+        },
+        {
+          "action": "generate_summary",
+          "include": ["timeline", "impact", "resolution"]
+        }
+      ]
+    }
+  },
+  "templates": {
+    "incident_alert": {
+      "blocks": [
+        {
+          "type": "header",
+          "text": "🚨 {{severity}} Incident: {{title}}"
+        },
+        {
+          "type": "section",
+          "fields": [
+            { "label": "Service", "value": "{{service}}" },
+            { "label": "Severity", "value": "{{severity}}" },
+            { "label": "Triggered", "value": "{{timestamp}}" },
+            { "label": "On-Call", "value": "{{oncall_user}}" }
+          ]
+        },
+        {
+          "type": "section",
+          "text": "**Summary:** {{ai_summary}}"
+        },
+        {
+          "type": "actions",
+          "elements": [
+            { "text": "View in PagerDuty", "url": "{{pagerduty_url}}" },
+            { "text": "View Ticket", "url": "{{ticket_url}}" },
+            { "text": "Suggested Runbook", "url": "{{runbook_url}}" }
+          ]
+        }
+      ]
+    }
+  }
+}
