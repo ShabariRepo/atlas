@@ -3,6 +3,11 @@
 # ============================================================
 # This file defines the entire Atlas agent stack.
 # Deploy with: bonito deploy -f bonito.yaml
+#
+# LEGEND:
+#   [WORKING]      - Tested and verified end-to-end
+#   [CONFIGURED]   - Declared here, processed by CLI on deploy
+#   [ROADMAP]      - Declared here, not yet processed at runtime
 # ============================================================
 
 version: "1"
@@ -12,29 +17,30 @@ description: AI-Powered DevOps Command Center
 # ── Gateway Configuration ────────────────────────────────────
 # Bonito Gateway routes requests across providers with
 # automatic fallback, load balancing, and cost optimization.
+# [WORKING] Provider connection + model routing verified E2E
 gateway:
   providers:
-    - name: anthropic
-      priority: 1
-      models: [claude-sonnet-4-20250514, claude-opus-4-20250514]
-      api_key: ${ANTHROPIC_API_KEY}
-
-    - name: openai
-      priority: 2
-      models: [gpt-4o, gpt-4o-mini]
-      api_key: ${OPENAI_API_KEY}
-
-    - name: groq
+    - name: groq                                  # [WORKING] Fast inference for sub-agents
       priority: 1
       models: [llama-3.3-70b-versatile, mixtral-8x7b-32768]
       api_key: ${GROQ_API_KEY}
 
-    - name: aws
-      priority: 3
-      models: [anthropic.claude-sonnet-4-20250514-v2:0, amazon.titan-text-express-v1]
+    - name: aws                                   # [WORKING] Bedrock for orchestration + embeddings
+      priority: 1
+      models: [amazon.nova-pro-v1:0, amazon.titan-embed-text-v1]
       region: ${AWS_REGION}
       access_key: ${AWS_ACCESS_KEY_ID}
       secret_key: ${AWS_SECRET_ACCESS_KEY}
+
+    - name: anthropic                             # [CONFIGURED] Claude for deep reasoning (code review)
+      priority: 2
+      models: [claude-sonnet-4-20250514]
+      api_key: ${ANTHROPIC_API_KEY}
+
+    - name: openai                                # [CONFIGURED] GPT-4o as alternative orchestrator
+      priority: 3
+      models: [gpt-4o, gpt-4o-mini]
+      api_key: ${OPENAI_API_KEY}
 
   routing:
     strategy: cost-optimized    # cost-optimized | latency-first | quality-first
@@ -42,12 +48,15 @@ gateway:
     retry_attempts: 2
     timeout_ms: 30000
 
-  rate_limits:
+  rate_limits:                  # [ROADMAP] Declared, not enforced at deploy time
     requests_per_minute: 500
     tokens_per_minute: 200000
 
 # ── MCP Servers ──────────────────────────────────────────────
 # External tool servers that agents can connect to.
+# [WORKING] All 4 servers tested E2E with mock MCP servers
+# speaking JSON-RPC 2.0 (initialize, tools/list, tools/call).
+# 17 tools total across 4 servers.
 mcp_servers:
   github:
     transport: sse
@@ -95,22 +104,26 @@ mcp_servers:
       - transitions
 
 # ── Knowledge Bases (RAG) ────────────────────────────────────
+# [WORKING] KB creation, document upload, embedding, and
+# retrieval-augmented generation all verified E2E.
+# 3 sample docs, 6 chunks, grounded answers with citations.
 knowledge_bases:
   internal-docs:
     description: Internal runbooks, API docs, and architecture documentation
     sources:
-      - type: directory
+      - type: directory                           # [WORKING] Local file upload
         path: ./agents/docs-assistant/sample-docs/
         glob: "**/*.md"
-      - type: confluence
-        base_url: ${CONFLUENCE_BASE_URL}
-        space_key: ENG
-        auth:
-          email: ${JIRA_EMAIL}
-          token: ${JIRA_API_TOKEN}
+      # - type: confluence                        # [ROADMAP] Cloud storage connector exists
+      #   base_url: ${CONFLUENCE_BASE_URL}        # but Confluence source not yet supported
+      #   space_key: ENG
+      #   auth:
+      #     email: ${JIRA_EMAIL}
+      #     token: ${JIRA_API_TOKEN}
     embedding:
-      model: text-embedding-3-small
-      provider: openai
+      model: amazon.titan-embed-text-v1           # [WORKING] Bedrock Titan embeddings
+      provider: aws                               # Must match a connected provider
+      # Alternative: text-embedding-3-small (requires OpenAI provider)
     chunking:
       strategy: semantic
       max_chunk_size: 1024
@@ -119,6 +132,7 @@ knowledge_bases:
 # ── Agents ───────────────────────────────────────────────────
 agents:
   # ── Incident Responder ───────────────────────────────────
+  # [WORKING] Tested: triage + jira_create_issue + slack_send_message in single turn
   incident-responder:
     type: bonbon
     mode: simple
@@ -127,18 +141,18 @@ agents:
     system_prompt: ./agents/incident-responder/system-prompt.md
 
     model:
-      primary: groq/llama-3.3-70b-versatile    # Groq for speed - triage needs to be fast
+      primary: groq/llama-3.3-70b-versatile    # [WORKING] Groq for speed - triage needs to be fast
       fallback: amazon.nova-pro-v1:0
     parameters:
       temperature: 0.2
       max_tokens: 2048
 
-    mcp_servers:
+    mcp_servers:                                # [WORKING] All 3 tested E2E
       - pagerduty
       - slack
       - jira
 
-    triggers:
+    triggers:                                   # [ROADMAP] Webhook ingestion not yet in platform runtime
       - type: webhook
         path: /webhooks/pagerduty
         source: pagerduty
@@ -148,7 +162,7 @@ agents:
         source: opsgenie
         events: [alert.created, alert.acknowledged]
 
-    actions:
+    actions:                                    # [ROADMAP] Action workflows not yet processed
       on_alert:
         - triage_severity
         - create_ticket
@@ -156,6 +170,7 @@ agents:
         - suggest_runbook
 
   # ── Code Reviewer ────────────────────────────────────────
+  # [WORKING] Tested: github_get_pull_request + structured security/performance review
   code-reviewer:
     type: bonbon
     mode: advanced
@@ -164,16 +179,20 @@ agents:
     system_prompt: ./agents/code-reviewer/system-prompt.md
 
     model:
-      primary: anthropic.claude-3-7-sonnet-20250219-v1:0  # Bedrock Claude - deep reasoning for code analysis
-      fallback: groq/llama-3.3-70b-versatile
+      primary: groq/llama-3.3-70b-versatile       # [WORKING] Fast code review on Groq
+      fallback: amazon.nova-pro-v1:0
+      # Ideal: anthropic.claude-3-7-sonnet-20250219-v1:0 (Bedrock)
+      # Claude on Bedrock requires inference profiles (cross-region or provisioned).
+      # If you have inference profiles configured, swap this to Claude for deeper analysis.
+      # Alternative: openai/gpt-4o via OpenAI Direct or Azure OpenAI.
     parameters:
       temperature: 0.3
       max_tokens: 8192
 
-    mcp_servers:
+    mcp_servers:                                   # [WORKING] GitHub MCP tested E2E
       - github
 
-    triggers:
+    triggers:                                      # [ROADMAP] Webhook + slash command triggers
       - type: webhook
         path: /webhooks/github/pr
         source: github
@@ -182,7 +201,7 @@ agents:
         command: /review
         description: Review a specific PR
 
-    review_config:
+    review_config:                                 # [ROADMAP] Review config not yet processed
       checks:
         - security
         - performance
@@ -197,6 +216,7 @@ agents:
         - "dist/**"
 
   # ── Docs Assistant ───────────────────────────────────────
+  # [WORKING] Tested: RAG retrieval from 3 runbooks, grounded answers with citations
   docs-assistant:
     type: bonbon
     mode: simple
@@ -205,19 +225,19 @@ agents:
     system_prompt: ./agents/docs-assistant/system-prompt.md
 
     model:
-      primary: amazon.nova-pro-v1:0              # AWS Nova - cost-efficient for Q&A
+      primary: amazon.nova-pro-v1:0              # [WORKING] AWS Nova - cost-efficient for Q&A
       fallback: groq/llama-3.3-70b-versatile
     parameters:
       temperature: 0.4
       max_tokens: 4096
 
-    rag:
+    rag:                                         # [WORKING] RAG retrieval verified E2E
       knowledge_base: internal-docs
       top_k: 5
       similarity_threshold: 0.72
       include_sources: true
 
-    widget:
+    widget:                                      # [ROADMAP] Widget config not yet processed by CLI
       enabled: true
       title: Engineering Docs
       placeholder: "Ask about runbooks, APIs, architecture..."
@@ -228,6 +248,7 @@ agents:
         - localhost
 
   # ── Deploy Monitor ───────────────────────────────────────
+  # [WORKING] Tested: github_list_workflow_runs + slack_send_message
   deploy-monitor:
     type: bonbon
     mode: advanced
@@ -236,17 +257,17 @@ agents:
     system_prompt: ./agents/deploy-monitor/system-prompt.md
 
     model:
-      primary: groq/llama-3.3-70b-versatile      # Fast summaries
-      fallback: openai/gpt-4o-mini
+      primary: groq/llama-3.3-70b-versatile      # [WORKING] Fast summaries on Groq
+      fallback: amazon.nova-pro-v1:0
     parameters:
       temperature: 0.2
       max_tokens: 2048
 
-    mcp_servers:
+    mcp_servers:                                  # [WORKING] Both tested E2E
       - github
       - slack
 
-    triggers:
+    triggers:                                     # [ROADMAP] Webhook + schedule triggers
       - type: webhook
         path: /webhooks/github/deploy
         source: github
@@ -258,16 +279,19 @@ agents:
         cron: "0 10 * * 1"                       # Monday weekly recap
         task: weekly_deploy_recap
 
-    metrics:
+    metrics:                                      # [ROADMAP] Metrics tracking
       track:
         - deploy_frequency
         - failure_rate
         - mean_time_to_recovery
         - change_lead_time
-      storage: bonito                             # Uses Bonito's built-in metrics store
+      storage: bonito
       retention_days: 90
 
   # ── Command Center (Orchestrator) ────────────────────────
+  # [WORKING] Tested: single delegation + multi-agent fan-out (delegate_task + collect_results)
+  # Nova Pro handles parallel delegation where Groq/Llama fails.
+  # For best results, use Claude (Anthropic Direct) or GPT-4o (OpenAI Direct) here.
   command-center:
     type: bonobot
     display_name: Atlas Command Center
@@ -275,13 +299,16 @@ agents:
     system_prompt: ./agents/command-center/system-prompt.md
 
     model:
-      primary: openai/gpt-oss-120b               # GPT OSS 120B on Groq - fast + smart routing
-      fallback: groq/llama-3.3-70b-versatile
+      primary: amazon.nova-pro-v1:0               # [WORKING] Bedrock Nova Pro - handles multi-agent delegation
+      fallback: groq/llama-3.3-70b-versatile      # Groq works for single delegation only
+      # Ideal: claude-sonnet-4-20250514 (Anthropic Direct) or gpt-4o (OpenAI Direct)
+      # Orchestrators need strong tool-calling models for multi-agent fan-out.
+      # Groq/Llama generates malformed tool calls on parallel delegation.
     parameters:
       temperature: 0.1
       max_tokens: 4096
 
-    delegates:
+    delegates:                                    # [WORKING] All 4 connections tested E2E
       - agent: incident-responder
         domains: [incidents, alerts, on-call, pages, outages, severity]
       - agent: code-reviewer
@@ -293,11 +320,11 @@ agents:
 
     delegation:
       strategy: intent-classification
-      allow_multi_agent: true                     # Can query multiple agents
-      synthesize_responses: true                  # Combine multi-agent responses
+      allow_multi_agent: true                     # [WORKING] Multi-agent fan-out verified
+      synthesize_responses: true                  # [WORKING] Combines responses from sub-agents
       max_delegation_depth: 2
 
-    channels:
+    channels:                                     # [ROADMAP] Channel integrations
       - type: slack
         commands:
           - /atlas
@@ -309,6 +336,8 @@ agents:
         placeholder: "Ask anything about your infrastructure..."
 
 # ── Observability ────────────────────────────────────────────
+# [ROADMAP] Observability config is declared for future runtime support.
+# Bonito dashboard already tracks per-request cost, tokens, and latency.
 observability:
   logging:
     level: ${ATLAS_LOG_LEVEL}
@@ -317,7 +346,7 @@ observability:
 
   tracing:
     enabled: true
-    provider: bonito                              # Built-in tracing
+    provider: bonito
     sample_rate: 1.0
 
   metrics:
