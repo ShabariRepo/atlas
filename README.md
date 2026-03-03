@@ -42,13 +42,13 @@ It runs on [Bonito](https://getbonito.com), which handles the hard parts: multi-
               Slack Alerts                 API Docs       DORA Metrics
 ```
 
-| Agent | Type | Model | What It Does |
-|-------|------|-------|-------------|
-| **Command Center** | [Bonobot](https://getbonito.com/docs/bonobot) | Claude Sonnet | Routes requests to the right agent, synthesizes multi-agent responses |
-| **Incident Responder** | [BonBon Simple](https://getbonito.com/docs/bonbon) | Groq Llama 3.3 70B | Triages alerts, creates tickets, notifies on-call, suggests runbooks |
-| **Code Reviewer** | [BonBon Advanced](https://getbonito.com/docs/bonbon) | Claude Sonnet | Reviews PRs for security, performance, and quality via GitHub MCP |
-| **Docs Assistant** | [BonBon Simple](https://getbonito.com/docs/bonbon) | GPT-4o Mini | Answers questions grounded in your internal docs (RAG) |
-| **Deploy Monitor** | [BonBon Advanced](https://getbonito.com/docs/bonbon) | Groq Llama 3.3 70B | Tracks deploys, posts summaries, reports DORA metrics |
+| Agent | Type | Model | Provider | What It Does |
+|-------|------|-------|----------|-------------|
+| **Command Center** | [Bonobot](https://getbonito.com/docs/bonobot) | Claude Sonnet 4 | AWS Bedrock | Routes requests to the right agent, synthesizes multi-agent responses |
+| **Incident Responder** | [BonBon Simple](https://getbonito.com/docs/bonbon) | Llama 3.3 70B | Groq | Triages alerts, creates tickets, notifies on-call, suggests runbooks |
+| **Code Reviewer** | [BonBon Advanced](https://getbonito.com/docs/bonbon) | Claude 3.7 Sonnet | AWS Bedrock | Reviews PRs for security, performance, and quality via GitHub MCP |
+| **Docs Assistant** | [BonBon Simple](https://getbonito.com/docs/bonbon) | Nova Pro | AWS Bedrock | Answers questions grounded in your internal docs (RAG) |
+| **Deploy Monitor** | [BonBon Advanced](https://getbonito.com/docs/bonbon) | Llama 3.3 70B | Groq | Tracks deploys, posts summaries, reports DORA metrics |
 
 ## Why Bonito
 
@@ -188,22 +188,24 @@ The entire Atlas stack is defined in a single [`bonito.yaml`](./bonito.yaml):
 ```yaml
 # One file defines everything:
 gateway:
-  providers: [anthropic, openai, groq, aws-bedrock]
+  providers: [groq, aws-bedrock]       # Each agent picks the best model for the job
   routing:
     strategy: cost-optimized
-
-mcp_servers:
-  github:    { transport: sse, url: ${MCP_GITHUB_URL:-http://localhost:3100/sse} }
-  pagerduty: { transport: sse, url: ${MCP_PAGERDUTY_URL:-http://localhost:3101/sse} }
 
 agents:
   incident-responder:
     type: bonbon
-    model: groq/llama-3.3-70b-versatile
+    model: groq/llama-3.3-70b-versatile       # Groq for speed
     mcp_servers: [pagerduty, slack, jira]
+
+  code-reviewer:
+    type: bonbon
+    model: anthropic.claude-3-7-sonnet-v1:0   # Bedrock Claude for deep analysis
+    mcp_servers: [github]
 
   command-center:
     type: bonobot
+    model: anthropic.claude-sonnet-4-v1:0     # Bedrock Claude for smart routing
     delegates: [incident-responder, code-reviewer, docs-assistant, deploy-monitor]
 ```
 
@@ -252,14 +254,14 @@ Common modifications:
 
 Running Atlas on [Bonito Pro](https://getbonito.com/pricing) ($499/mo):
 
-| Agent | Monthly Usage | Inference Cost |
-|-------|--------------|----------------|
-| Incident Responder | ~500 alerts | ~$2 (Groq) |
-| Code Reviewer | ~200 PRs | ~$15 (Claude) |
-| Docs Assistant | ~2,000 queries | ~$3 (GPT-4o Mini) |
-| Deploy Monitor | ~1,000 deploys | ~$2 (Groq) |
-| Command Center | ~3,000 routes | ~$8 (Claude) |
-| **Total inference** | | **~$30/mo** |
+| Agent | Monthly Usage | Model | Inference Cost |
+|-------|--------------|-------|----------------|
+| Incident Responder | ~500 alerts | Llama 3.3 (Groq) | ~$2 |
+| Code Reviewer | ~200 PRs | Claude 3.7 (Bedrock) | ~$15 |
+| Docs Assistant | ~2,000 queries | Nova Pro (Bedrock) | ~$4 |
+| Deploy Monitor | ~1,000 deploys | Llama 3.3 (Groq) | ~$2 |
+| Command Center | ~3,000 routes | Claude Sonnet (Bedrock) | ~$8 |
+| **Total inference** | | **3 models, 2 providers** | **~$31/mo** |
 
 That's a full DevOps AI team for under $550/month. [Compare plans](https://getbonito.com/pricing).
 
