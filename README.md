@@ -44,7 +44,7 @@ It runs on [Bonito](https://getbonito.com), which handles the hard parts: multi-
 
 | Agent | Type | Model | Provider | What It Does |
 |-------|------|-------|----------|-------------|
-| **Command Center** | [Bonobot](https://getbonito.com/docs/bonobot) | Claude Sonnet 4 | AWS Bedrock | Routes requests to the right agent, synthesizes multi-agent responses |
+| **Command Center** | [Bonobot](https://getbonito.com/docs/bonobot) | GPT OSS 120B | Groq | Routes requests to the right agent, synthesizes multi-agent responses |
 | **Incident Responder** | [BonBon Simple](https://getbonito.com/docs/bonbon) | Llama 3.3 70B | Groq | Triages alerts, creates tickets, notifies on-call, suggests runbooks |
 | **Code Reviewer** | [BonBon Advanced](https://getbonito.com/docs/bonbon) | Claude 3.7 Sonnet | AWS Bedrock | Reviews PRs for security, performance, and quality via GitHub MCP |
 | **Docs Assistant** | [BonBon Simple](https://getbonito.com/docs/bonbon) | Nova Pro | AWS Bedrock | Answers questions grounded in your internal docs (RAG) |
@@ -205,7 +205,7 @@ agents:
 
   command-center:
     type: bonobot
-    model: anthropic.claude-sonnet-4-v1:0     # Bedrock Claude for smart routing
+    model: openai/gpt-oss-120b                # GPT OSS on Groq - fast orchestration
     delegates: [incident-responder, code-reviewer, docs-assistant, deploy-monitor]
 ```
 
@@ -260,8 +260,8 @@ Running Atlas on [Bonito Pro](https://getbonito.com/pricing) ($499/mo):
 | Code Reviewer | ~200 PRs | Claude 3.7 (Bedrock) | ~$15 |
 | Docs Assistant | ~2,000 queries | Nova Pro (Bedrock) | ~$4 |
 | Deploy Monitor | ~1,000 deploys | Llama 3.3 (Groq) | ~$2 |
-| Command Center | ~3,000 routes | Claude Sonnet (Bedrock) | ~$8 |
-| **Total inference** | | **3 models, 2 providers** | **~$31/mo** |
+| Command Center | ~3,000 routes | GPT OSS 120B (Groq) | ~$3 |
+| **Total inference** | | **4 models, 2 providers** | **~$26/mo** |
 
 That's a full DevOps AI team for under $550/month. [Compare plans](https://getbonito.com/pricing).
 
