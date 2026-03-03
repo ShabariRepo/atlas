@@ -3,161 +3,152 @@ const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3103;
-const JIRA_BASE_URL = process.env.JIRA_BASE_URL || 'https://mock.atlassian.net';
-const JIRA_EMAIL = process.env.JIRA_EMAIL || 'mock@example.com';
-const JIRA_API_TOKEN = process.env.JIRA_API_TOKEN || 'mock-token';
 
 app.use(cors());
 app.use(express.json());
 
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy', service: 'jira-mcp', timestamp: new Date().toISOString() });
 });
 
-// SSE endpoint for MCP protocol
+const TOOLS = [
+  {
+    name: 'create_issue',
+    description: 'Create a new Jira issue',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project key (e.g. OPS)' },
+        summary: { type: 'string', description: 'Issue title' },
+        description: { type: 'string', description: 'Issue description' },
+        issue_type: { type: 'string', enum: ['Bug', 'Task', 'Story', 'Incident'], default: 'Task' },
+        priority: { type: 'string', enum: ['Critical', 'High', 'Medium', 'Low'], default: 'Medium' },
+        assignee: { type: 'string', description: 'Username to assign to' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'Labels to add' }
+      },
+      required: ['project', 'summary']
+    }
+  },
+  {
+    name: 'search_issues',
+    description: 'Search Jira issues using JQL',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        jql: { type: 'string', description: 'JQL query string' },
+        limit: { type: 'number', default: 10 }
+      },
+      required: ['jql']
+    }
+  },
+  {
+    name: 'update_issue',
+    description: 'Update an existing Jira issue',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issue_key: { type: 'string', description: 'Issue key (e.g. OPS-123)' },
+        status: { type: 'string', description: 'New status' },
+        assignee: { type: 'string' },
+        comment: { type: 'string', description: 'Comment to add' },
+        priority: { type: 'string' }
+      },
+      required: ['issue_key']
+    }
+  },
+  {
+    name: 'get_issue',
+    description: 'Get details of a specific Jira issue',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issue_key: { type: 'string', description: 'Issue key (e.g. OPS-123)' }
+      },
+      required: ['issue_key']
+    }
+  }
+];
+
+let issueCounter = 200;
+
+function handleToolCall(toolName, args) {
+  switch (toolName) {
+    case 'create_issue': {
+      issueCounter++;
+      const key = `${args.project || 'OPS'}-${issueCounter}`;
+      return JSON.stringify({
+        key, id: `${10000 + issueCounter}`,
+        summary: args.summary, status: 'Open',
+        issue_type: args.issue_type || 'Task',
+        priority: args.priority || 'Medium',
+        assignee: args.assignee || 'unassigned',
+        url: `https://your-org.atlassian.net/browse/${key}`
+      });
+    }
+    case 'search_issues':
+      return JSON.stringify({ issues: [
+        { key: 'OPS-189', summary: 'Investigate prod-api-3 CPU spike', status: 'In Progress', priority: 'High', assignee: 'dev-alice', updated: new Date(Date.now() - 3600000).toISOString() },
+        { key: 'OPS-185', summary: 'Payment service timeout errors', status: 'Open', priority: 'Critical', assignee: 'dev-bob', updated: new Date(Date.now() - 7200000).toISOString() },
+        { key: 'OPS-180', summary: 'Upgrade Redis to 7.2', status: 'To Do', priority: 'Medium', assignee: null, updated: new Date(Date.now() - 86400000).toISOString() }
+      ], total: 3 });
+    case 'update_issue':
+      return JSON.stringify({
+        key: args.issue_key, updated: true,
+        changes: {
+          ...(args.status && { status: args.status }),
+          ...(args.assignee && { assignee: args.assignee }),
+          ...(args.comment && { comment_added: true }),
+          ...(args.priority && { priority: args.priority })
+        }
+      });
+    case 'get_issue':
+      return JSON.stringify({
+        key: args.issue_key, summary: 'Investigate prod-api-3 CPU spike',
+        description: 'CPU usage on prod-api-3 exceeded 90% threshold. Needs investigation.',
+        status: 'In Progress', priority: 'High', issue_type: 'Incident',
+        assignee: 'dev-alice', reporter: 'pagerduty-integration',
+        created: new Date(Date.now() - 7200000).toISOString(),
+        comments: [
+          { author: 'dev-alice', body: 'Looking into this - appears related to the new cache layer', created: new Date(Date.now() - 3600000).toISOString() }
+        ]
+      });
+    default:
+      return JSON.stringify({ error: `Unknown tool: ${toolName}` });
+  }
+}
+
 app.get('/sse', (req, res) => {
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Cache-Control'
-  });
-
-  // Send initial connection event
-  res.write(`data: ${JSON.stringify({
-    type: 'connection',
-    service: 'jira-mcp',
-    capabilities: ['create_issue', 'update_issue', 'search', 'transitions'],
-    status: 'connected'
-  })}\\n\\n`);
-
-  // Keep connection alive
-  const keepAlive = setInterval(() => {
-    res.write(`data: ${JSON.stringify({
-      type: 'heartbeat',
-      timestamp: new Date().toISOString()
-    })}\\n\\n`);
-  }, 30000);
-
-  req.on('close', () => {
-    clearInterval(keepAlive);
-  });
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+  res.write(`data: ${JSON.stringify({ type: 'connection', service: 'jira-mcp' })}\n\n`);
+  const keepAlive = setInterval(() => res.write(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`), 30000);
+  req.on('close', () => clearInterval(keepAlive));
 });
 
-// Mock Jira API endpoints
-app.post('/rest/api/3/issue', (req, res) => {
-  const { fields } = req.body;
-  const newIssue = {
-    id: '10' + Math.floor(Math.random() * 1000),
-    key: 'MOCK-' + Math.floor(Math.random() * 1000),
-    self: `${JIRA_BASE_URL}/rest/api/3/issue/MOCK-123`,
-    fields: {
-      summary: fields?.summary || 'Mock Issue',
-      status: { name: 'To Do', id: '1' },
-      issuetype: { name: 'Task', id: '10001' },
-      project: { key: 'MOCK', id: '10000' },
-      created: new Date().toISOString(),
-      updated: new Date().toISOString()
+app.post('/sse', handleJsonRpc);
+app.post('/', handleJsonRpc);
+
+function handleJsonRpc(req, res) {
+  const { jsonrpc, id, method, params } = req.body;
+  if (jsonrpc !== '2.0') return res.json({ jsonrpc: '2.0', id, error: { code: -32600, message: 'Invalid Request' } });
+  if (id === undefined) return res.status(204).send();
+
+  switch (method) {
+    case 'initialize':
+      return res.json({ jsonrpc: '2.0', id, result: {
+        protocolVersion: '2024-11-05', capabilities: { tools: {} },
+        serverInfo: { name: 'jira-mcp', version: '1.0.0' }
+      }});
+    case 'tools/list':
+      return res.json({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
+    case 'tools/call': {
+      const resultText = handleToolCall(params?.name, params?.arguments || {});
+      return res.json({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: resultText }] } });
     }
-  };
-  
-  res.json(newIssue);
-});
-
-app.get('/rest/api/3/search', (req, res) => {
-  const { jql } = req.query;
-  res.json({
-    expand: 'names,schema',
-    startAt: 0,
-    maxResults: 50,
-    total: 2,
-    issues: [
-      {
-        id: '10001',
-        key: 'MOCK-1',
-        self: `${JIRA_BASE_URL}/rest/api/3/issue/MOCK-1`,
-        fields: {
-          summary: 'Mock Issue: Production Deployment',
-          status: { name: 'In Progress', id: '3' },
-          issuetype: { name: 'Task', id: '10001' },
-          project: { key: 'MOCK', id: '10000' },
-          assignee: { displayName: 'Mock User' }
-        }
-      },
-      {
-        id: '10002',
-        key: 'MOCK-2',
-        self: `${JIRA_BASE_URL}/rest/api/3/issue/MOCK-2`,
-        fields: {
-          summary: 'Mock Bug: API Timeout',
-          status: { name: 'To Do', id: '1' },
-          issuetype: { name: 'Bug', id: '10004' },
-          project: { key: 'MOCK', id: '10000' },
-          assignee: { displayName: 'Mock Developer' }
-        }
-      }
-    ]
-  });
-});
-
-app.put('/rest/api/3/issue/:issueKey', (req, res) => {
-  const { issueKey } = req.params;
-  const { fields } = req.body;
-  
-  res.status(204).json();
-});
-
-app.get('/rest/api/3/issue/:issueKey/transitions', (req, res) => {
-  const { issueKey } = req.params;
-  res.json({
-    transitions: [
-      {
-        id: '2',
-        name: 'Close Issue',
-        to: { name: 'Done', id: '6' }
-      },
-      {
-        id: '4',
-        name: 'Start Progress',
-        to: { name: 'In Progress', id: '3' }
-      }
-    ]
-  });
-});
-
-app.post('/rest/api/3/issue/:issueKey/transitions', (req, res) => {
-  const { issueKey } = req.params;
-  const { transition } = req.body;
-  
-  res.status(204).json();
-});
-
-app.get('/rest/api/3/project', (req, res) => {
-  res.json([
-    {
-      id: '10000',
-      key: 'MOCK',
-      name: 'Mock Project',
-      projectTypeKey: 'software',
-      self: `${JIRA_BASE_URL}/rest/api/3/project/10000`
-    }
-  ]);
-});
-
-// Generic catch-all for other Jira API calls
-app.all('/*', (req, res) => {
-  res.json({ 
-    message: 'Mock Jira MCP Server Response', 
-    method: req.method,
-    path: req.path,
-    authenticated: JIRA_API_TOKEN !== 'mock-token'
-  });
-});
+    default:
+      return res.json({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } });
+  }
+}
 
 app.listen(PORT, () => {
   console.log(`Jira MCP Server running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
 });

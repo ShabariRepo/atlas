@@ -40,3 +40,5 @@ venv/
 dist/
 build/
 *.tar.gz
+package-lock.json
+node_modules/
