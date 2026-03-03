@@ -218,7 +218,7 @@
       "blocks": [
         {
           "type": "header",
-          "text": "📊 Daily Deploy Summary — {{date}}"
+          "text": "Daily Deploy Summary - {{date}}"
         },
         {
           "type": "section",

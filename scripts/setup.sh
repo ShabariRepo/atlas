@@ -4,13 +4,13 @@ set -euo pipefail
 # Atlas Setup Script
 # Validates environment and prepares for deployment
 
-echo "🏔️  Atlas Setup"
-echo "==============="
+echo "Atlas Setup"
+echo "==========="
 echo ""
 
 # Check for .env
 if [ ! -f .env ]; then
-    echo "📋 Creating .env from template..."
+    echo "Creating .env from template..."
     cp .env.example .env
     echo "   Edit .env with your credentials before deploying."
     echo ""
@@ -31,13 +31,13 @@ check_var() {
 
     if [ -z "$value" ] || [[ "$value" == *"your-"* ]] || [[ "$value" == *"..."* ]]; then
         if [ "$required" = "required" ]; then
-            echo "  ❌ $var_name (required)"
+            echo "  [MISSING] $var_name (required)"
             MISSING=$((MISSING + 1))
         else
-            echo "  ⚠️  $var_name (optional - some features won't work)"
+            echo "  [SKIP]    $var_name (optional)"
         fi
     else
-        echo "  ✅ $var_name"
+        echo "  [OK]      $var_name"
     fi
 }
 
@@ -48,7 +48,7 @@ echo "Bonito:"
 check_var "BONITO_API_KEY" "required"
 check_var "BONITO_API_URL" "optional"
 if [ -z "${BONITO_API_URL:-}" ]; then
-    echo "  ℹ️  BONITO_API_URL not set, will use http://localhost:8001 (local dev)"
+    echo "  [INFO]    BONITO_API_URL not set, will use http://localhost:8001 (local dev)"
 fi
 echo ""
 
@@ -66,16 +66,16 @@ check_var "JIRA_BASE_URL" "optional"
 echo ""
 
 if [ "$MISSING" -gt 0 ]; then
-    echo "⛔ $MISSING required variable(s) missing. Edit .env and re-run."
+    echo "ERROR: $MISSING required variable(s) missing. Edit .env and re-run."
     exit 1
 fi
 
 # Check for Bonito CLI
 if command -v bonito &>/dev/null; then
-    echo "✅ Bonito CLI installed ($(bonito --version 2>/dev/null || echo 'unknown version'))"
+    echo "[OK] Bonito CLI installed ($(bonito --version 2>/dev/null || echo 'unknown version'))"
 else
-    echo "⚠️  Bonito CLI not found. Install with: pip install bonito-cli"
+    echo "[WARN] Bonito CLI not found. Install with: pip install bonito-cli"
 fi
 
 echo ""
-echo "✅ Setup complete. Run ./scripts/deploy-agents.sh to deploy."
+echo "Setup complete. Run ./scripts/deploy-agents.sh to deploy."

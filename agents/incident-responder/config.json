@@ -113,7 +113,7 @@
       "blocks": [
         {
           "type": "header",
-          "text": "🚨 {{severity}} Incident: {{title}}"
+          "text": "[{{severity}}] Incident: {{title}}"
         },
         {
           "type": "section",

@@ -4,8 +4,8 @@ set -euo pipefail
 # Atlas Agent Test Suite
 # Sends sample requests to each deployed agent and validates responses
 
-echo "🏔️  Atlas Test Suite"
-echo "==================="
+echo "Atlas Test Suite"
+echo "================"
 echo ""
 
 # Load env
@@ -17,7 +17,7 @@ BONITO_URL="${BONITO_API_URL:-https://api.getbonito.com}"
 API_KEY="${BONITO_API_KEY:-}"
 
 if [ -z "$API_KEY" ]; then
-    echo "❌ BONITO_API_KEY not set."
+    echo "ERROR: BONITO_API_KEY not set."
     exit 1
 fi
 
@@ -46,10 +46,10 @@ test_agent() {
     reply=$(echo "$response" | jq -r '.reply // .message // .content // .error // "no response"' 2>/dev/null || echo "parse error")
 
     if echo "$reply" | grep -qi "$expect_contains"; then
-        echo "✅"
+        echo "PASS"
         PASSED=$((PASSED + 1))
     else
-        echo "❌"
+        echo "FAIL"
         echo "    Expected to contain: $expect_contains"
         echo "    Got: $(echo "$reply" | head -1 | cut -c1-100)"
         FAILED=$((FAILED + 1))
@@ -148,12 +148,12 @@ echo ""
 
 # ── Summary ───────────────────────────────────────────────
 
-echo "==================="
+echo "================"
 echo "Results: $PASSED/$TOTAL passed"
 
 if [ "$FAILED" -gt 0 ]; then
-    echo "⚠️  $FAILED test(s) failed"
+    echo "$FAILED test(s) failed."
     exit 1
 else
-    echo "✅ All tests passed"
+    echo "All tests passed."
 fi

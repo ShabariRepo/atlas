@@ -4,8 +4,8 @@ set -euo pipefail
 # Atlas Agent Deployment Script
 # Deploys all agents to Bonito using the API
 
-echo "🏔️  Atlas Deploy"
-echo "================"
+echo "Atlas Deploy"
+echo "============"
 echo ""
 
 # Load env
@@ -25,13 +25,13 @@ if [ -z "$AUTH_TOKEN" ]; then
     BONITO_PASSWORD="${BONITO_PASSWORD:-}"
 
     if [ -z "$BONITO_EMAIL" ] || [ -z "$BONITO_PASSWORD" ]; then
-        echo "🔐 No auth token found. Please provide credentials."
+        echo "No auth token found. Please provide credentials."
         read -rp "  Email: " BONITO_EMAIL
         read -rsp "  Password: " BONITO_PASSWORD
         echo ""
     fi
 
-    echo "🔐 Logging in..."
+    echo "Authenticating..."
     LOGIN_RESPONSE=$(curl -s -X POST "${BONITO_URL}/api/auth/login" \
         -H "Content-Type: application/json" \
         -d "{\"email\": \"${BONITO_EMAIL}\", \"password\": \"${BONITO_PASSWORD}\"}")
@@ -39,10 +39,10 @@ if [ -z "$AUTH_TOKEN" ]; then
     AUTH_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.access_token // empty')
 
     if [ -z "$AUTH_TOKEN" ]; then
-        echo "❌ Login failed: $(echo "$LOGIN_RESPONSE" | jq -r '.error.message // "Unknown error"')"
+        echo "Login failed: $(echo "$LOGIN_RESPONSE" | jq -r '.error.message // "Unknown error"')"
         exit 1
     fi
-    echo "✅ Logged in."
+    echo "Authenticated."
     echo ""
 fi
 
@@ -55,7 +55,7 @@ find_or_create_project() {
         return
     fi
 
-    echo "📁 Finding or creating project..."
+    echo "Finding or creating project..."
     local projects
     projects=$(curl -s -H "$AUTH_HEADER" "${BONITO_URL}/api/projects")
 
@@ -72,21 +72,21 @@ find_or_create_project() {
         PROJECT_ID=$(echo "$create_response" | jq -r '.id // empty')
 
         if [ -z "$PROJECT_ID" ]; then
-            echo "❌ Failed to create project: $(echo "$create_response" | jq -r '.error.message // .')"
+            echo "  FAILED: Could not create project: $(echo "$create_response" | jq -r '.error.message // .')"
             exit 1
         fi
-        echo "  ✅ Created project: Atlas DevOps ($PROJECT_ID)"
+        echo "  Created project: Atlas DevOps ($PROJECT_ID)"
     else
         local project_name
         project_name=$(echo "$projects" | jq -r '.[0].name')
-        echo "  ✅ Using project: $project_name ($PROJECT_ID)"
+        echo "  Using project: $project_name ($PROJECT_ID)"
     fi
     echo ""
 }
 
 # ── Deploy Knowledge Base ───────────────────────────────────
 deploy_kb() {
-    echo "📚 Setting up knowledge base..."
+    echo "Setting up knowledge base..."
 
     local kb_response
     kb_response=$(curl -s -w "\n%{http_code}" \
@@ -109,7 +109,7 @@ deploy_kb() {
 
     if [[ "$http_code" =~ ^2 ]]; then
         KB_ID=$(echo "$kb_body" | jq -r '.id')
-        echo "  ✅ Knowledge base created ($KB_ID)"
+        echo "  Knowledge base created ($KB_ID)"
 
         # Upload sample docs
         if [ -d "agents/docs-assistant/sample-docs" ]; then
@@ -117,15 +117,15 @@ deploy_kb() {
                 [ -f "$doc" ] || continue
                 local doc_name
                 doc_name=$(basename "$doc")
-                echo "  📄 Uploading $doc_name..."
+                echo "  Uploading $doc_name..."
                 curl -s -X POST "${BONITO_URL}/api/knowledge-bases/${KB_ID}/documents" \
                     -H "$AUTH_HEADER" \
                     -F "file=@$doc" > /dev/null
             done
-            echo "  ✅ Documents uploaded"
+            echo "  Documents uploaded."
         fi
     else
-        echo "  ⚠️  KB creation returned HTTP $http_code"
+        echo "  WARN: KB creation returned HTTP $http_code"
         echo "     $(echo "$kb_body" | jq -r '.error.message // .' 2>/dev/null | head -1)"
         KB_ID=""
     fi
@@ -137,10 +137,10 @@ deploy_agent() {
     local prompt_path="agents/$name/system-prompt.md"
     local config_path="agents/$name/config.json"
 
-    echo "  🤖 $name..."
+    echo "  $name..."
 
     if [ ! -f "$config_path" ]; then
-        echo "     ❌ Config not found: $config_path"
+        echo "     FAILED: Config not found: $config_path"
         return 1
     fi
 
@@ -151,7 +151,6 @@ deploy_agent() {
     fi
 
     # Build the API payload from config.json
-    # The config has agent metadata, model info, etc. We map to Bonito's AgentCreate schema.
     local agent_name agent_desc model_id
     agent_name=$(jq -r '.agent.name // .name // "Unknown"' "$config_path")
     agent_desc=$(jq -r '.agent.description // .description // ""' "$config_path")
@@ -185,7 +184,7 @@ deploy_agent() {
     if [[ "$http_code" =~ ^2 ]]; then
         local agent_id
         agent_id=$(echo "$body" | jq -r '.id')
-        echo "     ✅ Deployed ($agent_id) - model: $model_id"
+        echo "     Deployed ($agent_id) - model: $model_id"
 
         # Register MCP servers if defined in config
         local mcp_servers
@@ -204,7 +203,7 @@ deploy_agent() {
                         \"transport_type\": \"http\",
                         \"endpoint_config\": {\"url\": \"$url\"},
                         \"auth_config\": {\"type\": \"none\"}
-                    }" > /dev/null 2>&1 && echo "     📡 MCP: $server_name connected" || echo "     ⚠️  MCP: $server_name failed"
+                    }" > /dev/null 2>&1 && echo "     MCP: $server_name connected" || echo "     WARN: MCP $server_name failed"
             fi
         done
 
@@ -214,10 +213,10 @@ deploy_agent() {
                 -H "$AUTH_HEADER" \
                 -H "Content-Type: application/json" \
                 -d "{\"knowledge_base_ids\": [\"$KB_ID\"]}" > /dev/null 2>&1 \
-                && echo "     📚 Knowledge base attached" || echo "     ⚠️  KB attach failed"
+                && echo "     Knowledge base attached" || echo "     WARN: KB attach failed"
         fi
     else
-        echo "     ❌ Failed (HTTP $http_code)"
+        echo "     FAILED (HTTP $http_code)"
         echo "     $(echo "$body" | jq -r '.error.message // .' 2>/dev/null | head -1)"
         return 1
     fi
@@ -231,7 +230,7 @@ KB_ID=""
 deploy_kb
 echo ""
 
-echo "🤖 Deploying agents..."
+echo "Deploying agents..."
 AGENTS=(
     "incident-responder"
     "code-reviewer"
@@ -249,12 +248,12 @@ done
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then
-    echo "✅ All ${#AGENTS[@]} agents deployed successfully."
+    echo "All ${#AGENTS[@]} agents deployed successfully."
     echo ""
     echo "Next steps:"
     echo "  1. Visit your Bonito dashboard to chat with agents"
     echo "  2. Test agents: ./scripts/test-agents.sh"
     echo "  3. Connect MCP servers for live integrations (GitHub, Slack, etc.)"
 else
-    echo "⚠️  $FAILED agent(s) failed to deploy. Check the output above."
+    echo "$FAILED agent(s) failed to deploy. Check the output above."
 fi
