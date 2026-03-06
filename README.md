@@ -19,7 +19,7 @@ It runs on [Bonito](https://getbonito.com), which handles the hard parts: multi-
 
 **This repo is a reference implementation.** Fork it, swap the prompts, connect your tools, deploy to Bonito. You can have a production multi-agent system running in an afternoon.
 
-> **New to Bonito?** [Sign up free](https://getbonito.com/signup) (1,000 API calls/month) and follow the [setup guide](./docs/BONITO-SETUP.md).
+> **New to Bonito?** [Sign up free](https://getbonito.com/signup) (5,000 API calls/month) and follow the [setup guide](./docs/BONITO-SETUP.md).
 
 ## What's Inside
 
@@ -336,7 +336,7 @@ Running Atlas on [Bonito Pro](https://getbonito.com/pricing) ($499/mo):
 
 That's a full DevOps AI team for under $520/month. Swap in Claude or GPT-4o where you need deeper reasoning - it'll cost more per call but the platform makes it a one-line config change.
 
-[Compare plans](https://getbonito.com/pricing). The [free tier](https://getbonito.com/signup) (1,000 calls/month) is enough to test all five agents.
+[Compare plans](https://getbonito.com/pricing). The [free tier](https://getbonito.com/signup) (5,000 calls/month) is enough to test all five agents and run real workflows.
 
 ## Docs
 
